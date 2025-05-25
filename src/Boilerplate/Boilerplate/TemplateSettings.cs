@@ -8,6 +8,7 @@ namespace Boilerplate
 {
     internal class TemplateSettings
     {
+        public string Group { get; set; } = string.Empty;
         public string FileName { get; set; } = string.Empty;
         public string FileExtension { get; set; } = "txt";
         public string OutputDirectory { get; set; } = string.Empty;

@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Boilerplate": {
+      "commandName": "Project",
+      "commandLineArgs": "-g cqrs-query -fn GetMovements -vs QueryName=GetMovements"
+    }
+  }
+}
