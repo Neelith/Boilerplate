@@ -5,7 +5,7 @@ using System.Text.Json;
 
 internal class Program
 {
-    private async static Task<int> Main(string[] args)
+    private async static Task Main(string[] args)
     {
         //I want a way to read config files defined by the user and generate files based on that config.
         //The user should define the templates for the files and the  files should be generated based on the templates.
@@ -16,17 +16,15 @@ internal class Program
 
         AppSettings? appsettings = ReadApplicationSettings();
         UserInput userInputSettings = ParseUserInput(args);
-        List<TemplateSettings> templateSettings = ReadTemplateSettings(appsettings, userInputSettings);
+        List<TemplateSettings> templateSettings = await ReadTemplateSettings(appsettings, userInputSettings);
 
         foreach (var settings in templateSettings)
         {
             GenerateFileFromSettings(settings);
         }
-
-        return 0;
     }
 
-    private static List<TemplateSettings> ReadTemplateSettings(AppSettings? appsettings, UserInput userInput)
+    private static async Task<List<TemplateSettings>> ReadTemplateSettings(AppSettings? appsettings, UserInput userInput)
     {
         // Step 1: Determine the templates directory
         string templatesBasePath = appsettings?.TemplatesFolderPath ?? Path.Combine(AppContext.BaseDirectory, "templates");
@@ -43,7 +41,7 @@ internal class Program
         var templateInputs = new List<TemplateInput>();
         foreach (var file in templateFiles)
         {
-            string jsonContent = File.ReadAllText(file);
+            string jsonContent = await File.ReadAllTextAsync(file);
             var templateInput = JsonSerializer.Deserialize<TemplateInput>(jsonContent);
             if (templateInput != null)
             {
@@ -52,8 +50,8 @@ internal class Program
         }
 
         // Step 3: Parse each template file into TemplateSettings
-        List<TemplateSettings> templateSettingsList = templateInputs.Select(templateInput => {
-
+        List<TemplateSettings> templateSettingsList = templateInputs.Select(templateInput =>
+        {
             // Add prefix and/or suffix to the file name if specified
             string fileName = templateInput.FileName;
             if (!string.IsNullOrEmpty(userInput.FileNamePrefix))
@@ -65,17 +63,45 @@ internal class Program
                 fileName = fileName + userInput.FileNameSuffix;
             }
 
+            // Determine output directory based on rules
+            string outputDir = GetOutpurDir(userInput, templateInput);
+
             return new TemplateSettings
             {
                 FileName = fileName,
                 FileExtension = templateInput.FileExtension,
-                OutputDirectory = !string.IsNullOrEmpty(userInput.OutputDirectoryBasePath) ? userInput.OutputDirectoryBasePath : templateInput.OutputDirectory,
+                OutputDirectory = outputDir,
                 Template = templateInput.Template,
                 Variables = userInput.Variables
             };
         }).ToList();
 
         return templateSettingsList;
+    }
+
+    private static string GetOutpurDir(UserInput userInput, TemplateInput templateInput)
+    {
+        string? userSpecifiedOutputDir = userInput.OutputDirectoryBasePath;
+        string templateOutputDir = templateInput.OutputDirectory;
+
+        // User  specify output directory
+        if (!string.IsNullOrEmpty(userSpecifiedOutputDir) && Path.IsPathRooted(userSpecifiedOutputDir))
+        {
+            return userSpecifiedOutputDir;
+        }
+
+        if (!string.IsNullOrEmpty(userSpecifiedOutputDir))
+        {
+            return Path.Combine(Environment.CurrentDirectory, userSpecifiedOutputDir);
+        }
+
+        // User did not specify output directory
+        if (Path.IsPathRooted(templateOutputDir))
+        {
+            return templateOutputDir;
+        }
+
+        return Path.Combine(Environment.CurrentDirectory, templateOutputDir);
     }
 
     private static UserInput ParseUserInput(string[] args)
@@ -97,6 +123,11 @@ internal class Program
         //Add -fn option for file name prefix
         var indexOfFileNamePrefixOption = Array.IndexOf(args!, "-fn");
         userInputSettings.FileNamePrefix = indexOfFileNamePrefixOption != -1 && indexOfFileNamePrefixOption + 1 < args!.Length ? args[indexOfFileNamePrefixOption + 1] : null;
+
+        //Add -o option for file name prefix
+        var indexOfOutputDirOption = Array.IndexOf(args!, "-o");
+        userInputSettings.OutputDirectoryBasePath = indexOfOutputDirOption != -1 && indexOfOutputDirOption + 1 < args!.Length ? args[indexOfOutputDirOption + 1] : null;
+
 
         //Add -vs option for variables
         var indexOfVariablesOption = Array.IndexOf(args!, "-vs");
