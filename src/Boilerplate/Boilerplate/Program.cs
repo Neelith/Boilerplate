@@ -3,41 +3,83 @@ using System.CommandLine;
 using System.Reflection;
 using System.Text.Json;
 
+/// <summary>
+/// Entry point for the template-based file generator application.
+/// Reads configuration, parses user input, loads templates, and generates files accordingly.
+/// </summary>
 internal class Program
 {
+    /// <summary>
+    /// Main entry point. Reads settings, parses user input, loads templates, and generates files.
+    /// </summary>
+    /// <param name="args">Command-line arguments.</param>
     private async static Task Main(string[] args)
     {
-        //I want a way to read config files defined by the user and generate files based on that config.
-        //The user should define the templates for the files and the  files should be generated based on the templates.
-        //The user then should be able to invoke this program, add the variables to the templates and generate the files.
+        // Define command line options
+        var groupOption = new Option<string?>(
+            aliases: ["--group", "-g"],
+            description: "Template group (subfolder under templates)",
+            getDefaultValue: () => string.Empty
+        );
+        var outputDirOption = new Option<string?>(
+            aliases: ["--output", "-o"],
+            description: "Base output directory for generated files"
+        );
+        var fileNamePrefixOption = new Option<string?>(
+            aliases: ["--prefix", "-p"],
+            description: "Prefix for generated file names"
+        );
+        var fileNameSuffixOption = new Option<string?>(
+            aliases: ["--suffix", "-s"],
+            description: "Suffix for generated file names"
+        );
+        var variablesOption = new Option<string?>(
+            aliases: ["--vars", "-vs"],
+            description: "Comma-separated key=value pairs for template variables"
+        );
 
-        //case -g (group name) cqrs-query -fn (se non specificato è prefisso) GetUser -vs QueryName=GetUser
-        //carica in memoria i template definiti in un file di configurazione, ad esempio un file json
-
-        AppSettings? appsettings = ReadApplicationSettings();
-        UserInput userInputSettings = ParseUserInput(args);
-        List<TemplateSettings> templateSettings = await ReadTemplateSettings(appsettings, userInputSettings);
-
-        foreach (var settings in templateSettings)
+        var rootCommand = new RootCommand("Template-based file generator")
         {
-            GenerateFileFromSettings(settings);
-        }
+            groupOption,
+            outputDirOption,
+            fileNamePrefixOption,
+            fileNameSuffixOption,
+            variablesOption
+        };
+
+        rootCommand.SetHandler(async (group, output, prefix, suffix, vars) =>
+        {
+            AppSettings? appsettings = ReadApplicationSettings();
+            UserInput userInputSettings = ParseUserInput(group, output, prefix, suffix, vars);
+            List<TemplateSettings> templateSettings = await ReadTemplateSettings(appsettings, userInputSettings);
+
+            foreach (var settings in templateSettings)
+            {
+                GenerateFileFromSettings(settings);
+            }
+        },
+        groupOption, outputDirOption, fileNamePrefixOption, fileNameSuffixOption, variablesOption);
+
+        await rootCommand.InvokeAsync(args);
     }
 
+    /// <summary>
+    /// Loads template settings from template files based on application and user input settings.
+    /// </summary>
+    /// <param name="appsettings">Application settings (may be null).</param>
+    /// <param name="userInput">User input parsed from command-line arguments.</param>
+    /// <returns>List of TemplateSettings for file generation.</returns>
     private static async Task<List<TemplateSettings>> ReadTemplateSettings(AppSettings? appsettings, UserInput userInput)
     {
-        // Step 1: Determine the templates directory
         string templatesBasePath = appsettings?.TemplatesFolderPath ?? Path.Combine(AppContext.BaseDirectory, "templates");
         string groupSubfolder = userInput.Group ?? string.Empty;
         string templatesPath = Path.Combine(templatesBasePath, groupSubfolder);
 
-        // Step 2: Read all template files in the directory
         if (!Directory.Exists(templatesPath))
             throw new DirectoryNotFoundException($"Templates directory not found: {templatesPath}");
 
         var templateFiles = Directory.GetFiles(templatesPath, "*.json", SearchOption.TopDirectoryOnly);
 
-        // Deserialize each template file into a list of TemplateInput
         var templateInputs = new List<TemplateInput>();
         foreach (var file in templateFiles)
         {
@@ -49,10 +91,8 @@ internal class Program
             }
         }
 
-        // Step 3: Parse each template file into TemplateSettings
         List<TemplateSettings> templateSettingsList = templateInputs.Select(templateInput =>
         {
-            // Add prefix and/or suffix to the file name if specified
             string fileName = templateInput.FileName;
             if (!string.IsNullOrEmpty(userInput.FileNamePrefix))
             {
@@ -63,7 +103,6 @@ internal class Program
                 fileName = fileName + userInput.FileNameSuffix;
             }
 
-            // Determine output directory based on rules
             string outputDir = GetOutpurDir(userInput, templateInput);
 
             return new TemplateSettings
@@ -79,12 +118,17 @@ internal class Program
         return templateSettingsList;
     }
 
+    /// <summary>
+    /// Determines the output directory for a generated file based on user and template settings.
+    /// </summary>
+    /// <param name="userInput">User input settings.</param>
+    /// <param name="templateInput">Template input definition.</param>
+    /// <returns>Resolved output directory path.</returns>
     private static string GetOutpurDir(UserInput userInput, TemplateInput templateInput)
     {
         string? userSpecifiedOutputDir = userInput.OutputDirectoryBasePath;
         string templateOutputDir = templateInput.OutputDirectory;
 
-        // User  specify output directory
         if (!string.IsNullOrEmpty(userSpecifiedOutputDir) && Path.IsPathRooted(userSpecifiedOutputDir))
         {
             return userSpecifiedOutputDir;
@@ -95,7 +139,6 @@ internal class Program
             return Path.Combine(Environment.CurrentDirectory, userSpecifiedOutputDir);
         }
 
-        // User did not specify output directory
         if (Path.IsPathRooted(templateOutputDir))
         {
             return templateOutputDir;
@@ -104,45 +147,43 @@ internal class Program
         return Path.Combine(Environment.CurrentDirectory, templateOutputDir);
     }
 
-    private static UserInput ParseUserInput(string[] args)
+    /// <summary>
+    /// Parses command-line arguments into a UserInput object.
+    /// </summary>
+    private static UserInput ParseUserInput(string? group, string? output, string? prefix, string? suffix, string? vars)
     {
-        var userInputSettings = new UserInput();
-
-        bool argsValorized = args is not null && args.Length > 0;
-
-        if (!argsValorized)
+        var userInputSettings = new UserInput
         {
-            return userInputSettings;
+            Group = group ?? string.Empty,
+            OutputDirectoryBasePath = output,
+            FileNamePrefix = prefix,
+            FileNameSuffix = suffix,
+            Variables = new Dictionary<string, string>()
+        };
+
+        // If prefix not specified, use last folder name of output directory as prefix
+        if (userInputSettings.FileNamePrefix is null && !string.IsNullOrEmpty(userInputSettings.OutputDirectoryBasePath))
+        {
+            string outputDir = userInputSettings.OutputDirectoryBasePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            userInputSettings.FileNamePrefix = Path.GetFileName(outputDir);
         }
 
-        //Add -g option for group name
-        var indexOfGroupOption = Array.IndexOf(args!, "-g");
-
-        userInputSettings.Group = indexOfGroupOption != -1 && indexOfGroupOption + 1 < args!.Length ? args[indexOfGroupOption + 1] : string.Empty;
-
-        //Add -fn option for file name prefix
-        var indexOfFileNamePrefixOption = Array.IndexOf(args!, "-fn");
-        userInputSettings.FileNamePrefix = indexOfFileNamePrefixOption != -1 && indexOfFileNamePrefixOption + 1 < args!.Length ? args[indexOfFileNamePrefixOption + 1] : null;
-
-        //Add -o option for file name prefix
-        var indexOfOutputDirOption = Array.IndexOf(args!, "-o");
-        userInputSettings.OutputDirectoryBasePath = indexOfOutputDirOption != -1 && indexOfOutputDirOption + 1 < args!.Length ? args[indexOfOutputDirOption + 1] : null;
-
-
-        //Add -vs option for variables
-        var indexOfVariablesOption = Array.IndexOf(args!, "-vs");
-        if (indexOfVariablesOption != -1 && indexOfVariablesOption + 1 < args!.Length)
+        if (!string.IsNullOrWhiteSpace(vars))
         {
-            var variables = args[indexOfVariablesOption + 1].Split(',');
-
-            userInputSettings.Variables = variables.ToDictionary(
-                v => v.Split('=')[0],
-                v => v.Split('=')[1]);
+            var variables = vars.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            userInputSettings.Variables = variables
+                .Select(v => v.Split('=', 2))
+                .Where(parts => parts.Length == 2)
+                .ToDictionary(parts => parts[0], parts => parts[1]);
         }
 
         return userInputSettings;
     }
 
+    /// <summary>
+    /// Reads application settings from appsettings.json if present.
+    /// </summary>
+    /// <returns>AppSettings object or null if not found.</returns>
     private static AppSettings? ReadApplicationSettings()
     {
         string configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
@@ -163,6 +204,10 @@ internal class Program
         return appSettings;
     }
 
+    /// <summary>
+    /// Generates a file from the provided template settings.
+    /// </summary>
+    /// <param name="settings">Template settings for file generation.</param>
     private static void GenerateFileFromSettings(TemplateSettings settings)
     {
         string template = GenerateFileContent(settings);
@@ -170,24 +215,34 @@ internal class Program
         GenerateFile(settings, template);
     }
 
+    /// <summary>
+    /// Replaces template variables in the template string with user-provided values.
+    /// </summary>
+    /// <param name="settings">Template settings containing variables and template.</param>
+    /// <returns>Processed template string with variables replaced.</returns>
     private static string GenerateFileContent(TemplateSettings settings)
     {
         var template = settings.Template;
 
         foreach (var variable in settings.Variables)
         {
-            template = template.Replace("{@" + variable.Key +"}", variable.Value);
+            template = template.Replace("{@" + variable.Key + "}", variable.Value);
         }
 
         return template;
     }
 
+    /// <summary>
+    /// Writes the generated template content to a file in the specified output directory.
+    /// </summary>
+    /// <param name="settings">Template settings including file name and output directory.</param>
+    /// <param name="template">Content to write to the file.</param>
     private static void GenerateFile(TemplateSettings settings, string template)
     {
         string filename = $"{settings.FileName}.{settings.FileExtension}";
 
-        string outputDirectory = settings.OutputDirectory.StartsWith('.') 
-            ? Path.Combine(AppContext.BaseDirectory, settings.OutputDirectory) 
+        string outputDirectory = settings.OutputDirectory.StartsWith('.')
+            ? Path.Combine(AppContext.BaseDirectory, settings.OutputDirectory)
             : settings.OutputDirectory;
 
         if (!Directory.Exists(outputDirectory))

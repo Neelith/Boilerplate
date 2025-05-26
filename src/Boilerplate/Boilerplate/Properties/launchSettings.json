@@ -2,7 +2,7 @@
   "profiles": {
     "Boilerplate": {
       "commandName": "Project",
-      "commandLineArgs": "-g cqrs-query -fn GetMovements -o ./pippo -vs QueryName=GetMovements,QueryParam2=Value2,QueryParam3=Value3"
+      "commandLineArgs": "-g cqrs-query -o pippo\\GetMovements -vs QueryName=Movements,QueryParam2=Value2,QueryParam3=Value3"
     }
   }
 }
