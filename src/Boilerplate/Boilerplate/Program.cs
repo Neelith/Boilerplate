@@ -15,6 +15,8 @@ internal class Program
     /// <param name="args">Command-line arguments.</param>
     private async static Task Main(string[] args)
     {
+        Console.WriteLine("Starting template-based file generator...");
+
         // Define command line options
         var groupOption = new Option<string?>(
             aliases: ["--group", "-g"],
@@ -49,14 +51,24 @@ internal class Program
 
         rootCommand.SetHandler(async (group, output, prefix, suffix, vars) =>
         {
+            Console.WriteLine("Reading application settings...");
             AppSettings? appsettings = ReadApplicationSettings();
+
+            Console.WriteLine("Parsing user input...");
             UserInput userInputSettings = ParseUserInput(group, output, prefix, suffix, vars);
+
+            Console.WriteLine("Loading template settings...");
             List<TemplateSettings> templateSettings = await ReadTemplateSettings(appsettings, userInputSettings);
+
+            Console.WriteLine($"Found {templateSettings.Count} template(s) to process.");
 
             foreach (var settings in templateSettings)
             {
+                Console.WriteLine($"Generating file: {settings.FileName}.{settings.FileExtension} in {settings.OutputDirectory}");
                 GenerateFileFromSettings(settings);
             }
+
+            Console.WriteLine("File generation complete.");
         },
         groupOption, outputDirOption, fileNamePrefixOption, fileNameSuffixOption, variablesOption);
 
@@ -75,14 +87,19 @@ internal class Program
         string groupSubfolder = userInput.Group ?? string.Empty;
         string templatesPath = Path.Combine(templatesBasePath, groupSubfolder);
 
+        Console.WriteLine($"Looking for templates in: {templatesPath}");
+
         if (!Directory.Exists(templatesPath))
             throw new DirectoryNotFoundException($"Templates directory not found: {templatesPath}");
 
         var templateFiles = Directory.GetFiles(templatesPath, "*.json", SearchOption.TopDirectoryOnly);
 
+        Console.WriteLine($"Found {templateFiles.Length} template file(s).");
+
         var templateInputs = new List<TemplateInput>();
         foreach (var file in templateFiles)
         {
+            Console.WriteLine($"Reading template file: {file}");
             string jsonContent = await File.ReadAllTextAsync(file);
             var templateInput = JsonSerializer.Deserialize<TemplateInput>(jsonContent);
             if (templateInput != null)
@@ -177,6 +194,13 @@ internal class Program
                 .ToDictionary(parts => parts[0], parts => parts[1]);
         }
 
+        Console.WriteLine("User input parsed:");
+        Console.WriteLine($"  Group: {userInputSettings.Group}");
+        Console.WriteLine($"  OutputDirectoryBasePath: {userInputSettings.OutputDirectoryBasePath}");
+        Console.WriteLine($"  FileNamePrefix: {userInputSettings.FileNamePrefix}");
+        Console.WriteLine($"  FileNameSuffix: {userInputSettings.FileNameSuffix}");
+        Console.WriteLine($"  Variables: {string.Join(", ", userInputSettings.Variables.Select(kv => $"{kv.Key}={kv.Value}"))}");
+
         return userInputSettings;
     }
 
@@ -192,6 +216,7 @@ internal class Program
 
         if (!File.Exists(configPath))
         {
+            Console.WriteLine("No appsettings.json found. Using defaults.");
             return appSettings;
         }
 
@@ -200,6 +225,8 @@ internal class Program
         ArgumentException.ThrowIfNullOrEmpty(nameof(json), "Configuration file is empty.");
 
         appSettings = JsonSerializer.Deserialize<AppSettings>(json!);
+
+        Console.WriteLine("Application settings loaded.");
 
         return appSettings;
     }
@@ -247,11 +274,13 @@ internal class Program
 
         if (!Directory.Exists(outputDirectory))
         {
+            Console.WriteLine($"Creating output directory: {outputDirectory}");
             Directory.CreateDirectory(outputDirectory);
         }
 
         string filePath = Path.Combine(outputDirectory, filename);
 
         File.WriteAllText(filePath, template);
+        Console.WriteLine($"File written: {filePath}");
     }
 }
