@@ -1,6 +1,6 @@
 ﻿namespace Boilerplate
 {
-    internal class UserInputSettings
+    internal class UserInput
     {
         public string Group { get; set; } = string.Empty;
         public string? FileNamePrefix { get; set; }
